@@ -78,6 +78,144 @@ app.get('/api/surveys/:id', async (req, res) => { // route pour récupérer un s
     }   
 });
 
+
+// Soumettre une réponse à un sondage (en batch avec transaction)
+app.post('/api/surveys/:id/responses', async (req, res) => {
+  try {
+    const surveyId = parseInt(req.params.id, 10);
+    const { userId, answers } = req.body; // answers = [{questionId, type, value}]
+
+    if (!Array.isArray(answers) || answers.length === 0) {
+      return res.status(400).json({ error: 'answers[] requis' });
+    }
+
+    // Vérifie que le sondage existe
+    const survey = await prisma.survey.findUnique({ where: { id: surveyId } });
+    if (!survey) {
+      return res.status(404).json({ error: 'Sondage non trouvé' });
+    }
+
+        // ⚠️ Vérifie si l'utilisateur a déjà répondu à ce sondage
+    const existing = await prisma.response.findFirst({
+      where: { surveyId, userId },
+    });
+
+    if (existing) {
+      return res.status(400).json({ error: 'Vous avez déjà répondu à ce sondage' });
+    }
+
+    // Prépare les écritures pour la transaction
+    const writes = answers.map(a => {
+      const base = {
+        surveyId,
+        questionId: a.questionId,
+        userId: userId || null,
+      };
+
+      if (a.type === 'SCALE') {
+        return prisma.response.create({ data: { ...base, answerNumber: Number(a.value) } });
+      } else if (a.type === 'MULTIPLE') {
+        return prisma.response.create({ data: { ...base, optionId: Number(a.value) } });
+      } else { // TEXT
+        return prisma.response.create({ data: { ...base, answerString: String(a.value) } });
+      }
+    });
+
+    // Exécute tout en une seule transaction
+    const tx = await prisma.$transaction(writes);
+
+    res.status(201).json({
+      message: 'Réponses enregistrées avec succès',
+      inserted: tx.length,
+      responses: tx
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Résultats d’une enquête (optimisé)
+app.get('/api/results/:surveyId', async (req, res) => {
+  try {
+    const surveyId = Number(req.params.surveyId);
+
+    // Charger l’enquête avec toutes les questions et options
+    const survey = await prisma.survey.findUnique({
+      where: { id: surveyId },
+      include: { questions: { include: { options: true } } },
+    });
+    if (!survey) return res.status(404).json({ error: 'Enquête introuvable' });
+
+    // Préparer les requêtes à exécuter en une seule transaction
+    const queries = [];
+    for (const q of survey.questions) {
+      if (q.type === 'SCALE') {
+        queries.push(
+          prisma.response.aggregate({
+            _avg: { answerNumber: true },
+            _count: { _all: true },
+            where: { questionId: q.id },
+          })
+        );
+      } else if (q.type === 'MULTIPLE') {
+        for (const opt of q.options) {
+          queries.push(
+            prisma.response.count({
+              where: { questionId: q.id, optionId: opt.id },
+            })
+          );
+        }
+      } else {
+        queries.push(
+          prisma.response.findMany({
+            where: { questionId: q.id, NOT: { answerString: null } },
+            select: { id: true, answerString: true, createdAt: true },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+          })
+        );
+      }
+    }
+
+    // Exécuter toutes les requêtes en parallèle
+    const resultsData = await prisma.$transaction(queries);
+
+    // Reconstruire les résultats question par question
+    const results = [];
+    let cursor = 0;
+    for (const q of survey.questions) {
+      if (q.type === 'SCALE') {
+        const agg = resultsData[cursor++];
+        results.push({
+          questionId: q.id,
+          text: q.text,
+          type: q.type,
+          count: agg._count._all,
+          average: agg._avg.answerNumber || 0,
+        });
+      } else if (q.type === 'MULTIPLE') {
+        const counts = [];
+        for (const opt of q.options) {
+          const c = resultsData[cursor++];
+          counts.push({ optionId: opt.id, label: opt.label, count: c });
+        }
+        results.push({ questionId: q.id, text: q.text, type: q.type, distribution: counts });
+      } else {
+        const comments = resultsData[cursor++];
+        results.push({ questionId: q.id, text: q.text, type: q.type, comments });
+      }
+    }
+
+    res.json({ survey: { id: survey.id, title: survey.title }, results });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+
+
 const PORT = process.env.PORT || 5000; // port du serveur
 // démarre le serveur
 app.listen(PORT, () => {
