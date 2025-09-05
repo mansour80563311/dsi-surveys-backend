@@ -1,0 +1,79 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+// generer un client prisma
+generator client {
+provider = "prisma-client-js"
+}
+
+//
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+//énumération qui définit le type de question dans un sondage
+enum QuestionType {
+  SCALE //échelle de 1 à 5
+  MULTIPLE //choix multiple
+  TEXT //réponse
+}
+
+
+//la table user représente les utilisateurs
+model User {
+  id Int @id @default(autoincrement())
+  name String?
+  email String? @unique
+  role String?
+  responses Response[]
+}
+
+//la table survey représente les sondages
+model Survey {
+  id Int @id @default(autoincrement())
+  title String
+  description String?
+  createdAt DateTime @default(now()) 
+  questions Question[]
+  responses Response[]
+}
+//la table question représente les questions d'un sondage
+model Question {
+  id Int @id @default(autoincrement())
+  surveyId Int
+  survey Survey @relation(fields: [surveyId], references: [id]) 
+  text String
+  type QuestionType
+  options Option[]
+  responses Response[]
+}
+//la table option représente les options de réponses pour les questions à choix multiple
+model Option {
+  id Int @id @default(autoincrement())
+  questionId Int //clé étrangère vers la table question
+  question Question @relation(fields: [questionId], references: [id]) //relation avec la table question
+  label String
+  responses Response[]
+}
+//la table response représente les réponses des utilisateurs aux questions des sondages
+model Response {
+  id Int @id @default(autoincrement())
+  surveyId Int //clé étrangère vers la table survey
+  survey Survey @relation(fields: [surveyId], references: [id]) //relation avec la table survey
+  questionId Int //clé étrangère vers la table question
+  question Question @relation(fields: [questionId], references: [id])//relation avec la table question
+  userId Int? //clé étrangère vers la table user 
+  user User? @relation(fields: [userId], references: [id]) //relation avec la table user
+        //les champs answerString et answerNumber permettent de stocker les 
+        //réponses textuelles et numériques
+  answerString String?
+  answerNumber Int?
+  optionId Int? //clé étrangère vers la table option pour les questions à choix multiple
+  option Option? @relation(fields: [optionId], references: [id]) //relation avec la table option 
+  createdAt DateTime @default(now()) //date de création de la réponse
+}
+
+
