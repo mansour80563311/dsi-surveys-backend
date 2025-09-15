@@ -15,10 +15,12 @@ app.use(express.json()); // pour parser le JSON dans les requêtes
 const surveyRoutes = require('./src/routes/surveyRoutes.js');
 const responseRoutes = require('./src/routes/responseRoutes.js');
 const resultRoutes = require('./src/routes/resultRoutes.js');
+const userRoutes = require('./src/routes/userRoutes.js');
 // Utiliser les routes
 app.use('/api/surveys', surveyRoutes); // utilise les routes de sondage
 app.use('/api/surveys/:id/responses', responseRoutes); // utilise les routes de réponses
 app.use('/api/results/:surveyId', resultRoutes); // utilise les routes de résultats
+app.use('/api/users', userRoutes); // utilise les routes d'utilisateurs
 
 
 
@@ -40,9 +42,7 @@ app.listen(PORT, () => {
 
 
 
-// Résultats d’une enquête (optimisé)
-// /api/results/:surveyId', 
- 
+
 
 
 
